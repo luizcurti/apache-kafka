@@ -1,67 +1,218 @@
-### Kafka Node.js Project
+# Kafka Node.js Producer & Consumer
 
-## Overview
+This project demonstrates the implementation of a Kafka Producer and Consumer using Node.js with the `node-rdkafka` library.
 
-This project consists of a Node.js application that integrates with Apache Kafka using the node-rdkafka library. It includes a Kafka producer, a Kafka consumer, and Docker configurations for easy setup.
+## 🚀 Features
 
-## Project Files
+- **Robust Producer** with delivery reports and error handling
+- **Resilient Consumer** with reconnection strategy and manual commit
+- **External configuration** via environment variables
+- **Docker Compose** with health checks and Kafka UI
+- **NPM Scripts** for development and production
+- **Graceful shutdown** for both producer and consumer
 
-1. Producer (producer.js)
+## 📋 Prerequisites
 
-This script creates a Kafka producer that sends messages to a Kafka topic.
-Uses node-rdkafka to produce messages.
-Connects to Kafka and sends 50 messages to the testKafka topic.
-Ensures idempotent production to avoid duplicate messages.
-Flushes and disconnects after sending messages.
+- Docker and Docker Compose
+- Node.js 18+ (if running outside container)
 
-2. Consumer (consumer.js)
+## 🛠️ Setup
 
-This script creates a Kafka consumer that listens for messages from a Kafka topic.
-Connects to Kafka and subscribes to the testKafka topic.
-Processes and prints received messages.
-Manually commits message offsets for better control.
-Handles graceful shutdown on SIGINT.
+### 1. Clone and configure
 
-3. Dockerfile (Dockerfile)
+```bash
+git clone <repo-url>
+cd kafka-node-producer-consumer
+```
 
-Defines the Node.js application environment.
-Uses the node:20 base image.
-Installs necessary dependencies including librdkafka.
-Copies package.json files and installs Node.js dependencies.
-Runs indefinitely for debugging (tail -f /dev/null).
+### 2. Configure environment variables
 
-4. Docker Compose (docker-compose.yml)
-Defines services for running Kafka and the Node.js app in a containerized environment.
-app: The Node.js application container.
-zookeeper: Manages Kafka brokers.
-kafka: Kafka broker with exposed ports 9092 and 9094.
-control-center: Web UI to monitor Kafka.
+```bash
+cp .env.example .env
+# Edit the .env file as needed
+```
 
-## How to Set Up and Run
+### 3. Install dependencies (optional, if running outside Docker)
 
-# Pre requisites
-Ensure you have:
+```bash
+npm install
+```
 
-* Docker and Docker Compose installed.
-* Node.js and npm installed (if running outside Docker).
+## 🐳 Running with Docker
 
-## Running the Application
+### Start complete environment
 
-Build and Start Containers:
-* docker-compose up -d --build
+```bash
+# Start all services
+npm run docker:up
 
-Check Running Containers:
-* docker ps
+# Or manually
+docker-compose up -d
+```
 
-Run the Producer:
-* docker exec -it node-kafka node producer.js
+### Check logs
 
-Run the Consumer:
-* docker exec -it node-kafka node consumer.js
+```bash
+# All services logs
+npm run docker:logs
 
-Monitor Kafka (Optional): Open Control Center in a browser.
+# Specific logs
+docker-compose logs -f kafka
+docker-compose logs -f app
+```
 
-## Stopping the Application
+### Stop environment
 
-To stop and remove all containers:
-* docker-compose down
+```bash
+npm run docker:down
+```
+
+## 🔧 Running applications
+
+### Inside container
+
+```bash
+# Producer
+docker-compose exec app npm run producer
+
+# Consumer (in another terminal)
+docker-compose exec app npm run consumer
+
+# Alternative producer
+docker-compose exec app npm run producer2
+```
+
+### Locally (outside Docker)
+
+```bash
+# Make sure Kafka is running in Docker
+# and configure KAFKA_BROKERS=localhost:9094 in .env
+
+# Producer
+npm run producer
+
+# Consumer
+npm run consumer
+
+# Development with auto-reload
+npm run dev:producer
+npm run dev:consumer
+```
+
+## 🖥️ Web Interfaces
+
+After running `docker-compose up -d`, access:
+
+- **Kafka UI**: http://localhost:8080 (Modern Kafka interface)
+- **Control Center**: http://localhost:9021 (Official Confluent interface)
+
+## 📊 Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm start` | Runs default producer |
+| `npm run producer` | Runs producer |
+| `npm run consumer` | Runs consumer |
+| `npm run producer2` | Runs alternative producer |
+| `npm run dev:producer` | Producer with auto-reload |
+| `npm run dev:consumer` | Consumer with auto-reload |
+| `npm run docker:up` | Start Docker environment |
+| `npm run docker:down` | Stop Docker environment |
+| `npm run docker:logs` | View Docker logs |
+
+## ⚙️ Main Configurations
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAFKA_BROKERS` | `kafka:9092` | Kafka broker addresses |
+| `KAFKA_TOPIC` | `testKafka` | Topic name |
+| `KAFKA_GROUP_ID` | `nodeapp-group` | Consumer group ID |
+| `MESSAGE_COUNT` | `50` | Number of messages (producer) |
+| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+
+### Producer Features
+
+- ✅ **Delivery reports** for delivery confirmation
+- ✅ **Idempotence** enabled by default
+- ✅ **Automatic retry** with exponential backoff
+- ✅ **Graceful shutdown** with message flush
+- ✅ **External configuration** via environment
+
+### Consumer Features
+
+- ✅ **Manual commit** for precise control
+- ✅ **Automatic reconnection strategy**
+- ✅ **Health monitoring** with heartbeat
+- ✅ **Robust error handling**
+- ✅ **Graceful shutdown** with statistics
+
+## 🔍 Monitoring and Debug
+
+### Detailed logs
+
+Configure `LOG_LEVEL=debug` in `.env` for verbose logs.
+
+### Health Check
+
+The consumer includes a heartbeat that prints statistics every 30 seconds:
+
+```
+💓 Heartbeat - Messages processed: 150
+```
+
+### Kafka UI
+
+Use the web interface at http://localhost:8080 to:
+
+- View topics and partitions
+- Monitor consumer groups
+- Inspect messages
+- Check consumer lag
+
+## 🚨 Troubleshooting
+
+### Connection error
+
+```bash
+# Check if Kafka is running
+docker-compose ps
+
+# Check Kafka logs
+docker-compose logs kafka
+```
+
+### Consumer not receiving messages
+
+1. Check if topic exists in Kafka UI
+2. Confirm `KAFKA_GROUP_ID` is correct
+3. Check `auto.offset.reset` in config
+
+### Performance
+
+For high throughput, adjust these settings:
+
+```env
+# Producer
+KAFKA_BATCH_SIZE=65536
+KAFKA_LINGER_MS=50
+
+# Consumer  
+KAFKA_MAX_POLL_RECORDS=2000
+```
+
+## 📁 Project Structure
+
+```
+kafka-node-producer-consumer/
+├── producer.js          # Main producer
+├── producer2.js         # Alternative producer
+├── consumer.js          # Consumer
+├── config.js           # Centralized configurations
+├── package.json        # Scripts and dependencies
+├── .env.example        # Configuration template
+├── Dockerfile          # Application container
+├── docker-compose.yaml # Complete orchestration
+└── README.md          # This documentation
+```

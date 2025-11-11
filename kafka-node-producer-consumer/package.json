@@ -1,13 +1,29 @@
 {
-    "name": "node-kafka",
-    "version": "1.0.0",
-    "description": "Kafka Producer and Consumer in Node.js",
-    "main": "producer.js",
-    "scripts": {
-      "start": "node producer.js"
-    },
-    "dependencies": {
-      "node-rdkafka": "^2.13.0"
-    }
-  }
+  "name": "node-kafka",
+  "version": "1.0.0",
+  "description": "Kafka Producer and Consumer in Node.js",
+  "main": "producer.js",
+  "scripts": {
+    "start": "node producer.js",
+    "producer": "node producer.js",
+    "producer2": "node producer2.js", 
+    "consumer": "node consumer.js",
+    "dev:producer": "nodemon producer.js",
+    "dev:consumer": "nodemon consumer.js",
+    "dev:producer2": "nodemon producer2.js",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "node-rdkafka": "^2.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["kafka", "node.js", "streaming", "producer", "consumer"],
+  "author": "",
+  "license": "MIT"
+}
   
