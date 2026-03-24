@@ -5,6 +5,12 @@
 CREATE DATABASE IF NOT EXISTS kafkadb;
 USE kafkadb;
 
+-- Create a dedicated Debezium user with minimum required privileges
+-- Replace 'debezium_password' with the value of MYSQL_CDC_PASSWORD from your .env
+CREATE USER IF NOT EXISTS 'debezium'@'%' IDENTIFIED BY 'debezium_password';
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'debezium'@'%';
+FLUSH PRIVILEGES;
+
 -- Create categories table with proper structure for CDC
 CREATE TABLE IF NOT EXISTS categories (
     id INT PRIMARY KEY AUTO_INCREMENT,

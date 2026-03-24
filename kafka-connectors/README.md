@@ -1,93 +1,95 @@
-# Kafka Connectors - MySQL to MongoDB
+# Kafka Connectors — MySQL to MongoDB CDC
 
-This project demonstrates real-time data replication from MySQL to MongoDB using Kafka Connect with Debezium source connector and MongoDB sink connector.
+Real-time data replication from MySQL to MongoDB using Kafka Connect with a Debezium source connector and a MongoDB sink connector.
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 MySQL (Source) → Debezium Connector → Kafka → MongoDB Connector → MongoDB (Sink)
 ```
 
-## 🚀 Features
+## Features
 
-- **Real-time CDC** (Change Data Capture) from MySQL
-- **Automatic schema detection** and evolution
-- **MongoDB sink** for document storage
-- **Web interfaces** for monitoring and management
-- **Docker orchestration** for easy deployment
+- **Real-time CDC** (Change Data Capture) — captures INSERT, UPDATE, DELETE from MySQL binlog
+- **Scoped capture** — only the `kafkadb` database and relevant tables are captured
+- **Dedicated CDC user** — Debezium uses a least-privilege MySQL account, not root
+- **All credentials via environment variables** — no secrets in source files
+- **Health checks** on all services — `depends_on` with `condition: service_healthy`
+- **Web interfaces** for monitoring and administration
+- **Pinned image versions** — reproducible builds
 
-## 📋 Services Included
+## Services
 
 | Service | Port | Description | Interface |
 |---------|------|-------------|-----------|
-| MySQL | 33600 | Source database | CLI/Tools |
+| MySQL | 33600 | Source database | CLI / MySQL tools |
 | MongoDB | 27017 | Target database | Mongo Express |
 | Kafka | 9092, 9094 | Message broker | Control Center |
+| ZooKeeper | 2181 | Kafka coordination | — |
 | Kafka Connect | 8083 | Connector runtime | REST API |
-| Control Center | 9021 | Kafka management | Web UI |
-| Mongo Express | 8085 | MongoDB admin | Web UI |
+| Control Center | 9021 | Confluent management UI | Web UI |
+| Mongo Express | 8085 | MongoDB admin UI | Web UI |
 
-## 🛠️ Setup and Usage
+## Setup
 
-### 1. Start the environment
+### 1. Configure environment variables
 
 ```bash
-# Start all services
+cp .env.example .env
+# Fill in the values — never commit .env to version control
+```
+
+**Required variables** (see `.env.example` for full list):
+
+| Variable | Description |
+|----------|-------------|
+| `MYSQL_ROOT_PASSWORD` | MySQL root password |
+| `MONGO_ROOT_USERNAME` | MongoDB admin username |
+| `MONGO_ROOT_PASSWORD` | MongoDB admin password |
+| `MONGO_EXPRESS_USER` | Mongo Express UI username |
+| `MONGO_EXPRESS_PASSWORD` | Mongo Express UI password |
+| `MYSQL_CDC_USER` | Dedicated Debezium MySQL user |
+| `MYSQL_CDC_PASSWORD` | Password for the Debezium user |
+
+### 2. Start all services
+
+```bash
 docker-compose up -d
 
-# Check service status
+# Check service health
 docker-compose ps
 
-# View logs
+# Follow Kafka Connect logs
 docker-compose logs -f kafka-connect
 ```
 
-### 2. Create and populate MySQL database
-
-#### Access MySQL
-```bash
-# Connect to MySQL container
-docker-compose exec mysql mysql -u root -p
-# Password: root
-```
-
-#### Create database and table
-```sql
-USE kafkadb;
-
--- Create the categories table
-CREATE TABLE categories (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
--- Insert sample data
-INSERT INTO categories (name, description) VALUES 
-('Electronics', 'Electronic devices and gadgets'),
-('Automotive', 'Cars, motorcycles and automotive parts'),
-('Musical Instruments', 'Guitars, pianos and other instruments'),
-('Books', 'Fiction, non-fiction and educational books'),
-('Sports', 'Sports equipment and accessories');
-
--- Verify data
-SELECT * FROM categories;
-```
-
-### 3. Configure Kafka Connectors
-
-#### Option A: Using Control Center UI
-
-1. **Access Control Center**: http://localhost:9021
-2. **Navigate to**: Clusters → Connect → connect-default
-3. **Upload connector configs**: `mysql.properties` and `mongodb.properties`
-
-#### Option B: Using REST API
+### 3. Initialise the MySQL database
 
 ```bash
-# Create MySQL source connector
+# Via Makefile (recommended)
+make connectors-setup-mysql
+
+# Or manually
+docker-compose exec -T mysql mysql -u root kafkadb < scripts/setup-mysql.sql
+```
+
+This script creates the schema (`categories`, `products`, `orders`, `order_items`), inserts sample data, and creates the dedicated `debezium` CDC user with the minimum required privileges.
+
+> **Note:** Update the `debezium` user password in `setup-mysql.sql` to match `MYSQL_CDC_PASSWORD` in your `.env` before running.
+
+### 4. Create source and sink connectors
+
+#### Option A — Makefile
+
+```bash
+make create-mysql-connector
+make create-mongo-connector
+```
+
+#### Option B — REST API
+
+```bash
+# MySQL source connector — reads from the Debezium CDC user
 curl -X POST http://localhost:8083/connectors \
   -H "Content-Type: application/json" \
   -d '{
@@ -97,18 +99,18 @@ curl -X POST http://localhost:8083/connectors \
       "tasks.max": "1",
       "database.hostname": "mysql",
       "database.port": "3306",
-      "database.user": "root",
-      "database.password": "root",
+      "database.user": "<MYSQL_CDC_USER>",
+      "database.password": "<MYSQL_CDC_PASSWORD>",
       "database.server.id": "1",
       "database.server.name": "mysql-server",
       "database.include.list": "kafkadb",
+      "table.include.list": "kafkadb.categories,kafkadb.products,kafkadb.orders,kafkadb.order_items",
       "database.history.kafka.bootstrap.servers": "kafka:9092",
-      "database.history.kafka.topic": "mysql_history",
-      "include.schema.changes": "true"
+      "database.history.kafka.topic": "mysql_history"
     }
   }'
 
-# Create MongoDB sink connector
+# MongoDB sink connector
 curl -X POST http://localhost:8083/connectors \
   -H "Content-Type: application/json" \
   -d '{
@@ -117,136 +119,141 @@ curl -X POST http://localhost:8083/connectors \
       "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
       "tasks.max": "1",
       "topics": "mysql-server.kafkadb.categories",
-      "connection.uri": "mongodb://root:root@mongodb:27017",
+      "connection.uri": "mongodb://<MONGO_ROOT_USERNAME>:<MONGO_ROOT_PASSWORD>@mongodb/",
       "database": "kafkadb",
-      "collection": "categories",
-      "transforms": "extractValue",
-      "transforms.extractValue.type": "org.apache.kafka.connect.transforms.ExtractField$Value",
-      "transforms.extractValue.field": "after"
+      "transforms": "extractAddress",
+      "transforms.extractAddress.type": "org.apache.kafka.connect.transforms.ExtractField$Value",
+      "transforms.extractAddress.field": "after"
     }
   }'
 ```
 
-### 4. Verify data replication
+### 5. Verify replication
 
-#### Check Kafka topics
 ```bash
-# List topics
+# List Kafka topics
 docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
 
-# View messages in MySQL topic
+# Consume raw CDC events
 docker-compose exec kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
   --topic mysql-server.kafkadb.categories \
   --from-beginning
 ```
 
-#### Check MongoDB data
-1. **Access Mongo Express**: http://localhost:8085
-   - Username: `root`
-   - Password: `root`
-2. **Navigate to**: kafkadb → categories collection
+Open **Mongo Express** at http://localhost:8085 and browse the `kafkadb` → `categories` collection.
 
-### 5. Test real-time replication
-
-```sql
--- In MySQL, add more data
-USE kafkadb;
-
-INSERT INTO categories (name, description) VALUES 
-('Home & Garden', 'Furniture, tools and garden supplies');
-
-UPDATE categories SET description = 'Updated description' WHERE id = 1;
-
-DELETE FROM categories WHERE id = 5;
-```
-
-Check MongoDB to see changes replicated in real-time!
-
-## 🔍 Monitoring and Management
-
-### Web Interfaces
-
-- **Kafka Control Center**: http://localhost:9021
-  - Monitor connectors, topics, and consumer lag
-  - View message flow and throughput
-  - Manage connector configurations
-
-- **Mongo Express**: http://localhost:8085
-  - Browse MongoDB collections
-  - View replicated data
-  - Query and analyze documents
-
-### REST API Endpoints
+### 6. Test real-time changes
 
 ```bash
-# Check connector status
-curl http://localhost:8083/connectors/mysql-source-connector/status
+# Access MySQL
+make connectors-mysql
+```
 
+```sql
+INSERT INTO categories (name, description, price) VALUES ('Home & Garden', 'Furniture and tools', 199.99);
+UPDATE categories SET description = 'Updated description' WHERE id = 1;
+DELETE FROM categories WHERE id = 3;
+```
+
+Changes appear in MongoDB in real time.
+
+## Monitoring
+
+### Web interfaces
+
+| Interface | URL |
+|-----------|-----|
+| Kafka Control Center | http://localhost:9021 |
+| Mongo Express | http://localhost:8085 |
+| Kafka Connect REST | http://localhost:8083 |
+
+### REST API reference
+
+```bash
 # List all connectors
-curl http://localhost:8083/connectors
+curl -s http://localhost:8083/connectors | jq
+
+# Check connector status
+curl -s http://localhost:8083/connectors/mysql-source-connector/status | jq
 
 # Restart a connector
 curl -X POST http://localhost:8083/connectors/mysql-source-connector/restart
 
 # Delete a connector
 curl -X DELETE http://localhost:8083/connectors/mysql-source-connector
+
+# Kafka Connect worker info
+curl -s http://localhost:8083/ | jq
 ```
 
-### Useful Commands
+### Useful commands
 
 ```bash
-# View connector logs
+# Connector logs
 docker-compose logs -f kafka-connect
 
-# Check Kafka Connect worker status
-curl http://localhost:8083/
+# Monitor MySQL binlog
+docker-compose exec mysql bash -c 'MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql -u root -e "SHOW BINARY LOGS;"'
 
-# Monitor MySQL binary logs
-docker-compose exec mysql mysql -u root -p -e "SHOW BINARY LOGS;"
-
-# Check MongoDB collections
-docker-compose exec mongodb mongosh -u root -p root --eval "db.getMongo().getDBNames()"
+# MongoDB shell
+make connectors-mongo
 ```
 
-## 🚨 Troubleshooting
+## Security
 
-### Common Issues
+- All passwords are loaded from environment variables — never hardcoded.
+- The Debezium connector uses a dedicated `debezium` user with only the minimum required grants (`SELECT`, `RELOAD`, `SHOW DATABASES`, `REPLICATION SLAVE`, `REPLICATION CLIENT`).
+- Mongo Express is protected with HTTP Basic Auth credentials set via `.env`.
+- The `.env` file is git-ignored; `.env.example` is provided as a safe template.
 
-#### Connector fails to start
+## Troubleshooting
+
+### Connector fails to start
+
 ```bash
-# Check connector status
-curl http://localhost:8083/connectors/mysql-source-connector/status
-
-# View detailed error logs
-docker-compose logs kafka-connect | grep ERROR
+# Detailed error
+curl -s http://localhost:8083/connectors/mysql-source-connector/status | jq
+docker-compose logs kafka-connect | grep -i error
 ```
 
-#### No data in MongoDB
-1. Verify MySQL binary logging is enabled
-2. Check if topics are created: `docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list`
-3. Ensure transforms are correctly configured in sink connector
+### No data appearing in MongoDB
 
-#### Permission denied errors
+1. Confirm MySQL binary logging is enabled: the `--binlog-format=ROW` flag is set in `docker-compose.yaml`
+2. Check that the Kafka topic `mysql-server.kafkadb.categories` was created
+3. Verify the transform field name (`after`) matches your connector version
+
+### Debezium user permission error
+
 ```bash
-# Reset MySQL permissions
-docker-compose exec mysql mysql -u root -p -e "
-  GRANT ALL PRIVILEGES ON *.* TO 'root'@'%';
-  FLUSH PRIVILEGES;
-"
+# Verify grants
+docker-compose exec mysql bash -c \
+  'MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql -u root -e "SHOW GRANTS FOR debezium@\"%\";"'
 ```
 
-### Performance Tuning
+### Performance tuning
 
-For high-throughput scenarios:
+For high-throughput scenarios, tune the MongoDB sink:
 
 ```json
 {
   "max.batch.size": "2048",
-  "batch.size": "1000",
-  "linger.ms": "10",
-  "buffer.memory": "67108864"
+  "bulk.write.ordered": "false"
 }
+```
+
+## Project Structure
+
+```
+kafka-connectors/
+├── connectors/
+│   ├── mysql.properties      # Debezium MySQL source config (credentials via env vars)
+│   └── mongodb.properties    # MongoDB sink config (credentials via env vars)
+├── scripts/
+│   └── setup-mysql.sql       # Schema, sample data, and Debezium user setup
+├── docker-compose.yaml       # Full stack with health checks and pinned versions
+├── .env.example              # Environment variable template
+└── README.md                 # This file
 ```
 
 ## 📁 Project Structure

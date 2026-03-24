@@ -1,4 +1,4 @@
-services:  
+services:
   mysql:
     image: mysql:8.0
     command: --innodb-use-native-aio=0 --default-authentication-plugin=mysql_native_password --server-id=1 --log-bin=mysql-bin --binlog-format=ROW --binlog-do-db=kafkadb
@@ -8,19 +8,31 @@ services:
       - "33600:3306"
     environment:
       - MYSQL_DATABASE=kafkadb
-      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     extra_hosts:
       - "host.docker.internal:172.17.0.1"
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.4.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'ruok' | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   kafka:
-    image: confluentinc/cp-kafka:latest
+    image: confluentinc/cp-kafka:7.4.0
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
       - "9094:9094"
@@ -32,14 +44,20 @@ services:
       KAFKA_LISTENERS: INTERNAL://:9092,OUTSIDE://:9094
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://host.docker.internal:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     extra_hosts:
       - "host.docker.internal:172.17.0.1"
 
   control-center:
-    image: confluentinc/cp-enterprise-control-center:6.0.1
+    image: confluentinc/cp-enterprise-control-center:7.4.0
     hostname: control-center
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "9021:9021"
     environment:
@@ -51,11 +69,13 @@ services:
       - "host.docker.internal:172.17.0.1"
 
   kafka-connect:
-    image: confluentinc/cp-kafka-connect-base:6.0.0
+    image: confluentinc/cp-kafka-connect-base:7.4.0
     container_name: kafka-connect
     depends_on:
-      - zookeeper
-      - kafka
+      zookeeper:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
     ports:
       - 8083:8083
     environment:
@@ -76,10 +96,6 @@ services:
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
-      # # Optional settings to include to support Confluent Control Center
-      #   CONNECT_PRODUCER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringProducerInterceptor"
-      #   CONNECT_CONSUMER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringConsumerInterceptor"
-      #  ---------------
       CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/data/connect-jars
     # If you want to use the Confluent Hub installer to d/l component, but make them available
     # when running this offline, spin up the stack once and then run :
@@ -109,26 +125,32 @@ services:
       - ./.docker/dbdata:/data/db
       - ./.docker/mongo:/docker-entrypoint-initdb.d
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=root
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
       - MONGO_INITDB_DATABASE=kafkadb
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     extra_hosts:
       - "host.docker.internal:172.17.0.1"
 
   mongo-express:
-    image: mongo-express
+    image: mongo-express:1.0.2
     restart: always
     ports:
       - 8085:8081
     environment:
       - ME_CONFIG_MONGODB_SERVER=mongodb
-      - ME_CONFIG_MONGODB_AUTH_USERNAME=root
-      - ME_CONFIG_MONGODB_AUTH_PASSWORD=root
-      - ME_CONFIG_MONGODB_ADMINUSERNAME=root
-      - ME_CONFIG_MONGODB_ADMINPASSWORD=root
+      - ME_CONFIG_MONGODB_AUTH_USERNAME=${MONGO_ROOT_USERNAME}
+      - ME_CONFIG_MONGODB_AUTH_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=${MONGO_ROOT_USERNAME}
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=${MONGO_ROOT_PASSWORD}
       - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
       - ME_CONFIG_BASICAUTH=true
-      - ME_CONFIG_BASICAUTH_PASSWORD=root
-      - ME_CONFIG_BASICAUTH_USERNAME=root
+      - ME_CONFIG_BASICAUTH_USERNAME=${MONGO_EXPRESS_USER}
+      - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASSWORD}
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy

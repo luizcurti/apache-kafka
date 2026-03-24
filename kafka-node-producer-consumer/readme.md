@@ -1,97 +1,81 @@
 # Kafka Node.js Producer & Consumer
 
-This project demonstrates the implementation of a Kafka Producer and Consumer using Node.js with the `node-rdkafka` library.
+Node.js implementation of Kafka producers and consumers using the `node-rdkafka` library (librdkafka C bindings).
 
 ## 🚀 Features
 
-- **Robust Producer** with delivery reports and error handling
-- **Resilient Consumer** with reconnection strategy and manual commit
-- **External configuration** via environment variables
-- **Docker Compose** with health checks and Kafka UI
-- **NPM Scripts** for development and production
-- **Graceful shutdown** for both producer and consumer
+- **Two producers** — `producer.js` (event-driven) and `producer2.js` (async/await with per-message delivery confirmation)
+- **Reliable delivery tracking** — delivery reports correlated via `opaque` id, not invalid callbacks
+- **Resilient consumer** — manual commit, exponential backoff reconnection, graceful shutdown
+- **All configuration via environment variables** — no hardcoded values
+- **Docker Compose** with health checks, service dependencies, and Kafka UI
+- **ESLint** configured for consistent code style
 
 ## 📋 Prerequisites
 
 - Docker and Docker Compose
-- Node.js 18+ (if running outside container)
+- Node.js 20+ (if running outside container)
 
 ## 🛠️ Setup
 
-### 1. Clone and configure
-
-```bash
-git clone <repo-url>
-cd kafka-node-producer-consumer
-```
-
-### 2. Configure environment variables
+### 1. Configure environment variables
 
 ```bash
 cp .env.example .env
-# Edit the .env file as needed
+# Edit .env with your values
 ```
 
-### 3. Install dependencies (optional, if running outside Docker)
+### 2. Install dependencies (only needed when running outside Docker)
 
 ```bash
-npm install
+npm ci
 ```
 
 ## 🐳 Running with Docker
 
-### Start complete environment
+### Start the full environment
 
 ```bash
-# Start all services
 npm run docker:up
-
-# Or manually
+# or
 docker-compose up -d
 ```
 
-### Check logs
+### View logs
 
 ```bash
-# All services logs
 npm run docker:logs
-
-# Specific logs
 docker-compose logs -f kafka
 docker-compose logs -f app
 ```
 
-### Stop environment
+### Stop
 
 ```bash
 npm run docker:down
 ```
 
-## 🔧 Running applications
+## 🔧 Running the applications
 
-### Inside container
+### Inside the container
 
 ```bash
-# Producer
+# Main producer (event-driven)
 docker-compose exec app npm run producer
 
-# Consumer (in another terminal)
-docker-compose exec app npm run consumer
-
-# Alternative producer
+# Alternative producer (async/await + delivery confirmation per message)
 docker-compose exec app npm run producer2
+
+# Consumer (in a separate terminal)
+docker-compose exec app npm run consumer
 ```
 
 ### Locally (outside Docker)
 
 ```bash
-# Make sure Kafka is running in Docker
-# and configure KAFKA_BROKERS=localhost:9094 in .env
+# Set KAFKA_BROKERS=localhost:9094 in .env to reach Kafka from the host
 
-# Producer
 npm run producer
-
-# Consumer
 npm run consumer
 
 # Development with auto-reload
@@ -101,118 +85,128 @@ npm run dev:consumer
 
 ## 🖥️ Web Interfaces
 
-After running `docker-compose up -d`, access:
+After `docker-compose up -d`:
 
-- **Kafka UI**: http://localhost:8080 (Modern Kafka interface)
-- **Control Center**: http://localhost:9021 (Official Confluent interface)
+- **Kafka UI** — http://localhost:8080 (topics, consumer groups, messages)
+- **Control Center** — http://localhost:9021 (official Confluent interface)
 
 ## 📊 Available Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm start` | Runs default producer |
-| `npm run producer` | Runs producer |
-| `npm run consumer` | Runs consumer |
-| `npm run producer2` | Runs alternative producer |
-| `npm run dev:producer` | Producer with auto-reload |
-| `npm run dev:consumer` | Consumer with auto-reload |
+| `npm start` | Runs `producer.js` |
+| `npm run producer` | Runs `producer.js` |
+| `npm run producer2` | Runs `producer2.js` (async/await with delivery confirmation) |
+| `npm run consumer` | Runs `consumer.js` |
+| `npm run dev:producer` | Producer with auto-reload (nodemon) |
+| `npm run dev:consumer` | Consumer with auto-reload (nodemon) |
+| `npm run dev:producer2` | producer2 with auto-reload (nodemon) |
+| `npm run lint` | Run ESLint |
+| `npm run lint:fix` | Run ESLint with auto-fix |
+| `npm test` | Run tests (`node --test`) |
 | `npm run docker:up` | Start Docker environment |
 | `npm run docker:down` | Stop Docker environment |
 | `npm run docker:logs` | View Docker logs |
 
-## ⚙️ Main Configurations
+## ⚙️ Configuration
 
-### Environment Variables
+All configuration is done via environment variables. Copy `.env.example` to `.env` and adjust as needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KAFKA_BROKERS` | `kafka:9092` | Kafka broker addresses |
+| `KAFKA_BROKERS` | `kafka:9092` | Broker address (use `localhost:9094` outside Docker) |
 | `KAFKA_TOPIC` | `testKafka` | Topic name |
 | `KAFKA_GROUP_ID` | `nodeapp-group` | Consumer group ID |
-| `MESSAGE_COUNT` | `50` | Number of messages (producer) |
-| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+| `KAFKA_CLIENT_ID` | `node-kafka-client` | Client identifier |
+| `KAFKA_AUTO_OFFSET_RESET` | `earliest` | Where to start reading if no offset exists |
+| `KAFKA_ENABLE_AUTO_COMMIT` | `false` | Auto-commit offsets (disabled for manual control) |
+| `KAFKA_SESSION_TIMEOUT` | `30000` | Consumer session timeout in ms |
+| `KAFKA_HEARTBEAT_INTERVAL` | `3000` | Heartbeat interval in ms |
+| `KAFKA_ACKS` | `all` | Producer acknowledgement level |
+| `KAFKA_ENABLE_IDEMPOTENCE` | `true` | Exactly-once producer semantics |
+| `KAFKA_RETRIES` | `3` | Producer retry attempts |
+| `KAFKA_BATCH_SIZE` | `16384` | Producer batch size in bytes |
+| `KAFKA_LINGER_MS` | `10` | Producer linger time in ms |
+| `KAFKA_REQUEST_TIMEOUT_MS` | `30000` | Producer request timeout in ms |
+| `MESSAGE_COUNT` | `50` | Number of messages sent by `producer.js` |
+| `MAX_RECONNECT_ATTEMPTS` | `5` | Max consumer reconnect attempts |
+| `LOG_LEVEL` | `info` | Log verbosity (`debug` \| `info`) |
+| `NODE_ENV` | `development` | Application environment |
 
-### Producer Features
+## 🏗️ Architecture notes
 
-- ✅ **Delivery reports** for delivery confirmation
-- ✅ **Idempotence** enabled by default
-- ✅ **Automatic retry** with exponential backoff
-- ✅ **Graceful shutdown** with message flush
-- ✅ **External configuration** via environment
+### producer.js
+Event-driven producer. Connects, sends N messages in a loop, flushes, disconnects, and exits. Delivery tracking is done via `delivery-report` events.
 
-### Consumer Features
+### producer2.js
+Async/await producer. Each `publishMessage()` call returns a Promise that resolves or rejects based on the actual Kafka delivery report — using `crypto.randomUUID()` as an `opaque` correlation id passed through `produce()` and returned in the `delivery-report` event.
 
-- ✅ **Manual commit** for precise control
-- ✅ **Automatic reconnection strategy**
-- ✅ **Health monitoring** with heartbeat
-- ✅ **Robust error handling**
-- ✅ **Graceful shutdown** with statistics
+> **Why opaque?** The `node-rdkafka` `produce()` method does **not** accept a callback. The 6th argument is an `opaque` value that is passed back untouched in the delivery-report event — this is the correct pattern for correlating individual messages to their Promise.
+
+### consumer.js
+Flow-mode consumer (`consumer.consume()`). Manual offset commit after each successful message. On processing errors, the message is committed anyway to prevent infinite reprocessing — in production, route to a Dead Letter Queue (DLQ) instead.
+
+## 🔒 Security
+
+- Docker image uses `node:20-alpine` and runs as the non-root `node` user
+- No secrets in source code — all credentials via `.env`
+- `.env` is git-ignored; `.env.example` is provided as a template
 
 ## 🔍 Monitoring and Debug
 
-### Detailed logs
+Enable verbose logging in `.env`:
 
-Configure `LOG_LEVEL=debug` in `.env` for verbose logs.
+```env
+LOG_LEVEL=debug
+```
 
-### Health Check
-
-The consumer includes a heartbeat that prints statistics every 30 seconds:
+The consumer logs a heartbeat every 30 seconds:
 
 ```
 💓 Heartbeat - Messages processed: 150
 ```
 
-### Kafka UI
-
-Use the web interface at http://localhost:8080 to:
-
-- View topics and partitions
-- Monitor consumer groups
-- Inspect messages
-- Check consumer lag
+Use **Kafka UI** at http://localhost:8080 to inspect topics, partitions, consumer group lag, and individual messages.
 
 ## 🚨 Troubleshooting
 
-### Connection error
+### Cannot connect to Kafka
 
 ```bash
-# Check if Kafka is running
+# Check service health
 docker-compose ps
 
-# Check Kafka logs
+# Check Kafka broker logs
 docker-compose logs kafka
 ```
 
 ### Consumer not receiving messages
 
-1. Check if topic exists in Kafka UI
-2. Confirm `KAFKA_GROUP_ID` is correct
-3. Check `auto.offset.reset` in config
+1. Confirm the topic exists in Kafka UI
+2. Check `KAFKA_GROUP_ID` matches what was used before
+3. Verify `KAFKA_AUTO_OFFSET_RESET=earliest` if the topic already has messages
 
-### Performance
+### High producer latency
 
-For high throughput, adjust these settings:
+Tune for throughput (at the cost of latency):
 
 ```env
-# Producer
 KAFKA_BATCH_SIZE=65536
 KAFKA_LINGER_MS=50
-
-# Consumer  
-KAFKA_MAX_POLL_RECORDS=2000
 ```
 
 ## 📁 Project Structure
 
 ```
 kafka-node-producer-consumer/
-├── producer.js          # Main producer
-├── producer2.js         # Alternative producer
-├── consumer.js          # Consumer
-├── config.js           # Centralized configurations
-├── package.json        # Scripts and dependencies
-├── .env.example        # Configuration template
-├── Dockerfile          # Application container
-├── docker-compose.yaml # Complete orchestration
-└── README.md          # This documentation
+├── producer.js           # Event-driven producer
+├── producer2.js          # Async/await producer with per-message delivery tracking
+├── consumer.js           # Flow-mode consumer with manual commit
+├── config.js             # Centralised configuration + validation
+├── .eslintrc.json        # ESLint rules
+├── package.json          # Scripts and dependencies
+├── .env.example          # Environment variable template
+├── Dockerfile            # Alpine image, non-root user
+├── docker-compose.yaml   # Full environment with health checks
+└── readme.md             # This file
 ```

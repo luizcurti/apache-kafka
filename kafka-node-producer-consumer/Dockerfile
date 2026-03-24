@@ -1,12 +1,14 @@
-FROM node:20
+FROM node:20-alpine
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y build-essential librdkafka-dev && \
-    npm install -g npm
+RUN apk add --no-cache python3 make g++ librdkafka-dev
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
+
+# Run as non-root user (security best practice — OWASP A05)
+RUN chown -R node:node /app
+USER node
 
 CMD ["tail", "-f", "/dev/null"]

@@ -11,7 +11,7 @@ try {
 
 // Message tracking counter
 let messagesProcessed = 0;
-let lastHeartbeat = Date.now();
+let heartbeatInterval = null;
 
 const consumer = new Kafka.KafkaConsumer({
   'bootstrap.servers': config.kafka.brokers,
@@ -21,12 +21,11 @@ const consumer = new Kafka.KafkaConsumer({
   'enable.auto.commit': config.consumer.enableAutoCommit,
   'session.timeout.ms': config.consumer.sessionTimeout,
   'heartbeat.interval.ms': config.consumer.heartbeatInterval,
-  'max.poll.records': config.consumer.maxPollRecords,
 }, {});
 
 let isConnected = false;
 let reconnectAttempts = 0;
-const maxReconnectAttempts = parseInt(process.env.MAX_RECONNECT_ATTEMPTS) || 5;
+const maxReconnectAttempts = parseInt(process.env.MAX_RECONNECT_ATTEMPTS, 10) || 5;
 
 consumer.connect();
 
@@ -42,9 +41,8 @@ consumer.on('ready', () => {
   consumer.subscribe([config.kafka.topic]);
   consumer.consume();
   
-  // Health check heartbeat
-  setInterval(() => {
-    lastHeartbeat = Date.now();
+  // Health check heartbeat — store ref so it can be cleared on shutdown
+  heartbeatInterval = setInterval(() => {
     if (config.app.logLevel === 'debug') {
       console.log(`💓 Heartbeat - Messages processed: ${messagesProcessed}`);
     }
@@ -86,8 +84,6 @@ consumer.on('data', (msg) => {
       value: msg.value ? msg.value.toString() : null
     });
     
-    // In case of error, still commit to avoid reprocessing
-    // In production, you could send to a DLQ (Dead Letter Queue)
     consumer.commitMessage(msg);
   }
 });
@@ -133,18 +129,10 @@ consumer.on('disconnected', () => {
 
 // Function to process message (customize as needed)
 function processMessage(messageValue, messageKey) {
-  try {
-    // Add your processing logic here
-    // For example: parse JSON, validation, transformation, etc.
-    
+  try {    
     if (config.app.logLevel === 'debug') {
       console.log(`🔄 Processing message with key: ${messageKey}`);
     }
-    
-    // Simulate processing
-    // const data = JSON.parse(messageValue);
-    // await saveToDatabase(data);
-    
   } catch (err) {
     console.error('❌ Error in message processing logic:', err);
     throw err; // Re-throw so it can be captured in the main handler
@@ -155,7 +143,11 @@ function processMessage(messageValue, messageKey) {
 function gracefulShutdown() {
   console.log('\n🛑 Shutting down gracefully...');
   console.log(`📊 Final Stats: ${messagesProcessed} messages processed`);
-  
+
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+
   if (isConnected) {
     consumer.disconnect((err) => {
       if (err) {

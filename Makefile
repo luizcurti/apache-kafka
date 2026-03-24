@@ -50,25 +50,25 @@ connectors-logs: ## Show logs for Connectors environment
 
 connectors-setup-mysql: ## Setup MySQL database with sample data
 	@echo "🗄️ Setting up MySQL database..."
-	cd kafka-connectors && docker-compose exec mysql mysql -u root -proot kafkadb < scripts/setup-mysql.sql
+	cd kafka-connectors && MYSQL_PWD=$${MYSQL_ROOT_PASSWORD} docker-compose exec -T mysql mysql -u root kafkadb < scripts/setup-mysql.sql
 	@echo "✅ MySQL database setup complete"
 
 connectors-mysql: ## Access MySQL shell
-	cd kafka-connectors && docker-compose exec mysql mysql -u root -proot kafkadb
+	cd kafka-connectors && MYSQL_PWD=$${MYSQL_ROOT_PASSWORD} docker-compose exec mysql mysql -u root kafkadb
 
 connectors-mongo: ## Access MongoDB shell
-	cd kafka-connectors && docker-compose exec mongodb mongosh -u root -p root kafkadb
+	cd kafka-connectors && docker-compose exec mongodb mongosh -u $${MONGO_ROOT_USERNAME} -p $${MONGO_ROOT_PASSWORD} kafkadb
 
 # Combined commands
 up-all: ## Start both environments
 	@echo "🚀 Starting all Kafka environments..."
-	make node-up
-	make connectors-up
+	$(MAKE) node-up
+	$(MAKE) connectors-up
 
 down-all: ## Stop both environments
 	@echo "🛑 Stopping all Kafka environments..."
-	make node-down
-	make connectors-down
+	$(MAKE) node-down
+	$(MAKE) connectors-down
 
 status: ## Show status of all containers
 	@echo "📊 Node.js Environment:"
@@ -91,8 +91,8 @@ clean: ## Clean up all containers, networks, and volumes
 	@echo "✅ Cleanup complete"
 
 restart-all: ## Restart both environments
-	make down-all
-	make up-all
+	$(MAKE) down-all
+	$(MAKE) up-all
 
 # Development commands
 install: ## Install Node.js dependencies
@@ -110,13 +110,13 @@ create-mysql-connector: ## Create MySQL source connector
 	@echo "🔌 Creating MySQL source connector..."
 	curl -X POST http://localhost:8083/connectors \
 		-H "Content-Type: application/json" \
-		-d @kafka-connectors/connectors/mysql-connector.json
+		-d @kafka-connectors/connectors/mysql.properties
 
 create-mongo-connector: ## Create MongoDB sink connector
 	@echo "🔌 Creating MongoDB sink connector..."
 	curl -X POST http://localhost:8083/connectors \
 		-H "Content-Type: application/json" \
-		-d @kafka-connectors/connectors/mongodb-connector.json
+		-d @kafka-connectors/connectors/mongodb.properties
 
 list-connectors: ## List all Kafka connectors
 	@echo "📋 Active connectors:"

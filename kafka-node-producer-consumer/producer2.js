@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const Kafka = require("node-rdkafka");
 const { config, validateConfig } = require("./config");
 
@@ -24,37 +25,49 @@ function createProducer() {
   });
 }
 
-// Publishes a message to Kafka with improved error handling
+// Map of pending promises keyed by correlation id (opaque)
+const pendingMessages = new Map();
+
+// Resolves/rejects pending promises when delivery-report arrives
+function handleDeliveryReport(err, report) {
+  const correlationId = report.opaque;
+  const pending = pendingMessages.get(correlationId);
+  if (!pending) return;
+
+  pendingMessages.delete(correlationId);
+  if (err) {
+    pending.reject(new Error(`Delivery failed: ${err.message}`));
+  } else {
+    if (config.app.logLevel === 'debug') {
+      console.log(`📩 Message delivered - Topic: ${report.topic}, Partition: ${report.partition}, Offset: ${report.offset}`);
+    } else {
+      console.log('✅ Message delivered successfully');
+    }
+    pending.resolve(report);
+  }
+}
+
+// Publishes a message to Kafka and waits for delivery confirmation
 function publishMessage(producer, topic, message, key) {
   return new Promise((resolve, reject) => {
     if (config.app.logLevel === 'debug') {
       console.log("📤 Attempting to send message...");
     }
 
+    const correlationId = crypto.randomUUID();
+    pendingMessages.set(correlationId, { resolve, reject });
+
     try {
-      if (config.app.logLevel === 'debug') {
-        console.log("➡️ Calling produce...");
-      }
-      
       producer.produce(
         topic,
         null, // Partition (null = automatic choice for better distribution)
         Buffer.from(message), // Message
         key ? Buffer.from(key) : null, // Message key
         Date.now(), // Timestamp
-        (err, offset) => {
-          if (err) {
-            reject(new Error(`Failed to produce message: ${err.message}`));
-          } else {
-            if (config.app.logLevel === 'debug') {
-              console.log("✅ Message queued successfully!");
-            }
-            resolve(offset);
-          }
-        }
+        correlationId // opaque: passed back in delivery-report for correlation
       );
-      
     } catch (err) {
+      pendingMessages.delete(correlationId);
       reject(new Error(`Error producing message: ${err.message}`));
     }
   });
@@ -86,17 +99,7 @@ async function main() {
     }, 100);
 
     // Properly captures delivery events
-    producer.on("delivery-report", (err, report) => {
-      if (err) {
-        console.error("❌ Error delivering message:", err);
-      } else {
-        if (config.app.logLevel === 'debug') {
-          console.log(`📩 Message delivered - Topic: ${report.topic}, Partition: ${report.partition}, Offset: ${report.offset}`);
-        } else {
-          console.log(`✅ Message delivered successfully`);
-        }
-      }
-    });
+    producer.on("delivery-report", handleDeliveryReport);
 
     producer.on("ready", async () => {
       clearTimeout(connectTimeout);
@@ -142,6 +145,12 @@ async function main() {
         console.error("❌ Error in message publishing:", err.message);
       }
 
+      // Stop polling before flush to avoid race conditions
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+
       // Waits for all messages to be sent before disconnecting
       producer.flush(5000, (err) => {
         if (err) {
@@ -150,17 +159,13 @@ async function main() {
           console.log("🚀 All messages flushed successfully");
         }
         
-        if (pollInterval) {
-          clearInterval(pollInterval);
-        }
-        
         producer.disconnect((disconnectErr) => {
           if (disconnectErr) {
             console.error("❌ Error disconnecting:", disconnectErr);
             process.exit(1);
           } else {
             console.log("🔌 Producer disconnected successfully");
-            process.exit(0);
+            process.exit(err ? 1 : 0);
           }
         });
       });

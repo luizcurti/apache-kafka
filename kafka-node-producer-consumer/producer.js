@@ -31,7 +31,7 @@ producer.on("ready", () => {
   console.log(`📤 Sending messages to topic: ${config.kafka.topic}`);
 
   // Send messages
-  const totalMessages = parseInt(process.env.MESSAGE_COUNT) || 50;
+  const totalMessages = parseInt(process.env.MESSAGE_COUNT, 10) || 50;
   
   for (let i = 1; i <= totalMessages; i++) {
     const message = `Message ${i} - ${new Date().toISOString()}`;
@@ -42,12 +42,8 @@ producer.on("ready", () => {
         null, // Partition (null for automatic balancing)
         Buffer.from(message), // Message converted to Buffer
         `key-${i}`, // Key (helps with partitioning)
-        Date.now(), // Timestamp
-        (err, offset) => {
-          if (err) {
-            console.error(`❌ Failed to send message ${i}:`, err);
-          }
-        }
+        Date.now() // Timestamp
+        // Delivery errors are reported via the 'delivery-report' event below
       );
 
       messagesSent++;
@@ -93,14 +89,8 @@ producer.on("delivery-report", (err, report) => {
 
 producer.on("event.error", (err) => {
   console.error("❌ Producer error:", err);
-  
-  // Attempt to reconnect in case of connection error
-  if (err.code === -195 || err.code === -185) { // Network error codes
-    console.log("🔄 Attempting to reconnect...");
-    setTimeout(() => {
-      producer.connect();
-    }, 5000);
-  }
+  // This is a one-shot producer (connect → send → flush → exit).
+  // Fatal errors are surfaced here; the flush/disconnect callbacks will handle exit codes.
 });
 
 producer.on("event.log", (log) => {
@@ -110,27 +100,26 @@ producer.on("event.log", (log) => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-  
-  producer.flush(1000, (err) => {
-    producer.disconnect((err) => {
-      console.log('🚪 Producer disconnected');
-      process.exit(0);
-    });
-  });
-});
+function gracefulShutdown(signal) {
+  console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
 
-process.on('SIGTERM', () => {
-  console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
-  
-  producer.flush(1000, (err) => {
-    producer.disconnect((err) => {
-      console.log('🚪 Producer disconnected');
-      process.exit(0);
+  producer.flush(3000, (flushErr) => {
+    if (flushErr) {
+      console.error('❌ Error flushing messages during shutdown:', flushErr);
+    }
+    producer.disconnect((disconnectErr) => {
+      if (disconnectErr) {
+        console.error('❌ Error disconnecting during shutdown:', disconnectErr);
+      } else {
+        console.log('🚪 Producer disconnected');
+      }
+      process.exit(flushErr || disconnectErr ? 1 : 0);
     });
   });
-});
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 console.log("🚀 Starting Kafka producer...");
 producer.connect();
